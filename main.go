@@ -19,8 +19,10 @@ import (
 )
 
 var (
-	queueCh = make(chan queuedSound, 10)
-	archive *vpk.VPK
+	queueCh   = make(chan queuedSound, 10)
+	archive   *vpk.VPK
+	basenames map[string]string
+	params    = dvoice.DefaultParams
 )
 
 func main() {
@@ -38,10 +40,18 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	basenames := make(map[string]string, len(archive.Files))
+	basenames = make(map[string]string, len(archive.Files))
 	for name := range archive.Files {
 		bn := path.Base(name)
 		bn = bn[:len(bn)-7]
+		basenames[bn] = name
+		dirname := path.Base(path.Dir(name))
+		if dirname == "wisp" {
+			bn = "wisp_" + bn
+		} else if strings.HasPrefix(dirname, "announcer_dlc_") || dirname == "announcer_diretide_2012" {
+			bn = dirname[10:] + "_" + bn
+			log.Printf("%q -> %q", name, bn)
+		}
 		basenames[bn] = name
 	}
 	s := bufio.NewScanner(f)
@@ -98,17 +108,34 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 	parts = parts[1:]
-	filename := soundmapFind(parts)
-	if filename == "" {
-		log.Printf("no matches: %s", strings.Join(parts, " "))
-		return
+	var entry *vpk.FileEntry
+	if len(parts) == 1 && strings.ContainsRune(parts[0], '_') {
+		entry = archive.Files[parts[0]]
+		if entry == nil {
+			filename := basenames[parts[0]]
+			if filename != "" {
+				entry = archive.Files[filename]
+			}
+		}
 	}
-	entry := archive.Files[filename]
 	if entry == nil {
-		log.Printf("sound %s is missing", filename)
+		filename := soundmapFind(parts)
+		if filename == "" {
+			log.Printf("no matches: %s", strings.Join(parts, " "))
+			return
+		}
+		entry = archive.Files[filename]
+		if entry == nil {
+			log.Printf("sound %s is missing", filename)
+			return
+		}
+	}
+	frameList, err := transcode(entry)
+	if err != nil {
+		log.Printf("error decoding %s: %s", entry.Name, err)
 		return
 	}
-	q := queuedSound{channel, entry}
+	q := queuedSound{channel, frameList, entry}
 	select {
 	case queueCh <- q:
 	default:
@@ -140,16 +167,18 @@ func voiceChannelForUser(s *discordgo.Session, m *discordgo.MessageCreate) *disc
 }
 
 type queuedSound struct {
-	channel *discordgo.Channel
-	entry   *vpk.FileEntry
+	channel   *discordgo.Channel
+	frameList [][]byte
+	entry     *vpk.FileEntry
 }
 
 func playQueued(ctx context.Context, s *discordgo.Session) {
-	var vc *discordgo.VoiceConnection
+	var vc *dvoice.VoiceConn
+	h := dvoice.New(s)
 	leaveTimer := time.NewTimer(0)
 	defer func() {
 		if vc != nil {
-			vc.Disconnect()
+			vc.Close()
 		}
 		leaveTimer.Stop()
 	}()
@@ -162,26 +191,26 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 		case <-leaveTimer.C:
 			if vc != nil {
 				log.Printf("playq: leaving")
-				vc.Disconnect()
+				vc.Close()
 				vc = nil
 			}
 			continue
 		case q = <-queueCh:
-			log.Printf("playq: got sound %#v", q)
+			log.Printf("playq: got sound %q", q.entry.Name)
 		}
 		leaveTimer.Stop()
 		select {
 		case <-leaveTimer.C:
 		default:
 		}
-		if vc == nil || vc.GuildID != q.channel.GuildID || vc.ChannelID != q.channel.ID {
+		if vc == nil || vc.GuildID() != q.channel.GuildID || vc.ChannelID() != q.channel.ID {
 			if vc != nil {
-				vc.Disconnect()
+				vc.Close()
 				vc = nil
 			}
 			log.Printf("joining")
 			var err error
-			vc, err = s.ChannelVoiceJoin(q.channel.GuildID, q.channel.ID, false, false)
+			vc, err = h.Join(q.channel.GuildID, q.channel.ID, params)
 			if err != nil {
 				log.Printf("error: failed to join voice channel %q<%s> on %s: %s", q.channel.Name, q.channel.ID, q.channel.GuildID, err)
 				continue
@@ -189,27 +218,42 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			log.Printf("joined")
 		}
 		log.Printf("playing %s", q.entry.Name)
-		if err := playEntry(ctx, vc, q.entry); err != nil {
-			log.Printf("error playing %s: %s", q.entry.Name, err)
-		} else {
-			log.Printf("played")
+		for _, frame := range q.frameList {
+			select {
+			case vc.OpusSend <- frame:
+			case <-ctx.Done():
+				log.Printf("playq: exiting")
+				return
+			}
 		}
-		leaveTimer.Reset(1 * time.Second)
+		leaveTimer.Reset(time.Second)
 	}
 }
 
-func playEntry(ctx context.Context, vc *discordgo.VoiceConnection, entry *vpk.FileEntry) error {
+func transcode(entry *vpk.FileEntry) ([][]byte, error) {
 	r, err := entry.Open()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res, err := vres.Parse(r, entry.TotalSize)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	snd, err := res.Sound()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return dvoice.PlayStream(ctx, vc, snd)
+	var frameList [][]byte
+	ch := make(chan []byte)
+	done := make(chan struct{})
+	go func() {
+		for frame := range ch {
+			frameList = append(frameList, frame)
+		}
+		close(done)
+	}()
+	err = dvoice.PlayStream(context.Background(), ch, snd, params)
+	close(ch)
+	<-done
+	return frameList, err
 }

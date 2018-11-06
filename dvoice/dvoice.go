@@ -12,38 +12,49 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
-	"github.com/bwmarrin/discordgo"
 	"layeh.com/gopus"
 )
 
-const (
-	channels   = 2
-	sampleRate = 48000
-	frameSize  = 960
-	maxBytes   = 4096
-	bitRate    = 64000
-)
+type OpusParams struct {
+	Channels   int // Number of channels
+	SampleRate int // Samples per second
+	FrameSize  int // Samples per frame
+	BitRate    int // Bits per second
+}
 
-func PlayStream(ctx context.Context, vc *discordgo.VoiceConnection, r io.Reader) error {
+func (p OpusParams) FrameTime() time.Duration {
+	return time.Second * time.Duration(p.FrameSize) / time.Duration(p.SampleRate)
+}
+
+var DefaultParams = OpusParams{
+	Channels:   2,
+	SampleRate: 48000,
+	FrameSize:  960,
+	BitRate:    64000,
+}
+
+const maxBytes = 1200
+
+func PlayStream(ctx context.Context, opusFrames chan<- []byte, r io.Reader, p OpusParams) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	enc, err := gopus.NewEncoder(sampleRate, channels, gopus.Audio)
+	enc, err := gopus.NewEncoder(p.SampleRate, p.Channels, gopus.Audio)
 	if err != nil {
 		return err
 	}
-	enc.SetBitrate(bitRate)
+	enc.SetBitrate(p.BitRate)
 
 	proc := exec.CommandContext(ctx, "ffmpeg",
 		"-i", "-",
 		"-f", "s16le",
-		"-ar", strconv.Itoa(sampleRate),
-		"-ac", strconv.Itoa(channels),
+		"-ar", strconv.Itoa(p.SampleRate),
+		"-ac", strconv.Itoa(p.Channels),
 		"-loglevel", "error",
 		"-",
 	)
@@ -57,13 +68,9 @@ func PlayStream(ctx context.Context, vc *discordgo.VoiceConnection, r io.Reader)
 		return err
 	}
 
-	if err := vc.Speaking(true); err != nil {
-		return fmt.Errorf("setting speaking=true: %s", err)
-	}
-	defer vc.Speaking(false)
-	pcmbuf := bufio.NewReaderSize(stdout, frameSize*channels*2*4)
+	pcmbuf := bufio.NewReaderSize(stdout, p.FrameSize*p.Channels*8)
 	for {
-		pcm := make([]int16, frameSize*channels)
+		pcm := make([]int16, p.FrameSize*p.Channels)
 		if err := binary.Read(pcmbuf, binary.LittleEndian, &pcm); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -72,16 +79,14 @@ func PlayStream(ctx context.Context, vc *discordgo.VoiceConnection, r io.Reader)
 			}
 			return err
 		}
-		opus, err := enc.Encode(pcm, frameSize, maxBytes)
+		opus, err := enc.Encode(pcm, p.FrameSize, maxBytes)
 		if err != nil {
 			return err
 		}
-		if vc.Ready {
-			select {
-			case vc.OpusSend <- opus:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		select {
+		case opusFrames <- opus:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	cancel()

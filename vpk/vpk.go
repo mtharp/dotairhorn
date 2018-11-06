@@ -38,7 +38,8 @@ type VPK struct {
 	Header VPKHeader
 	Files  map[string]*FileEntry
 
-	f, lastAr   *os.File
+	f           *os.File
+	archives    map[uint16]*os.File
 	archiveBase string
 }
 
@@ -92,8 +93,9 @@ func Open(vpkName, filterExt string) (*VPK, error) {
 		return nil, err
 	}
 	v := &VPK{
-		f:     f,
-		Files: make(map[string]*FileEntry),
+		f:        f,
+		archives: make(map[uint16]*os.File),
+		Files:    make(map[string]*FileEntry),
 	}
 	if strings.HasSuffix(vpkName, "_dir.vpk") {
 		v.archiveBase, err = filepath.Abs(vpkName[:len(vpkName)-8])
@@ -175,10 +177,10 @@ func Open(vpkName, filterExt string) (*VPK, error) {
 }
 
 func (v *VPK) Close() error {
-	if v.lastAr != nil {
-		v.lastAr.Close()
-		v.lastAr = nil
+	for _, f := range v.archives {
+		f.Close()
 	}
+	v.archives = nil
 	v.f.Close()
 	return nil
 }
@@ -191,15 +193,14 @@ func (v *VPK) openSegment(archiveIndex uint16, entryOffset, entryLength uint32) 
 		return nil, errors.New("expected multipart VPK but filename does not end in _dir.vpk")
 	}
 	arName := fmt.Sprintf("%s_%03d.vpk", v.archiveBase, archiveIndex)
-	if v.lastAr == nil || v.lastAr.Name() != arName {
-		if v.lastAr != nil {
-			v.lastAr.Close()
-		}
+	f := v.archives[archiveIndex]
+	if f == nil {
 		var err error
-		v.lastAr, err = os.Open(arName)
+		f, err = os.Open(arName)
 		if err != nil {
 			return nil, err
 		}
+		v.archives[archiveIndex] = f
 	}
-	return io.NewSectionReader(v.lastAr, int64(entryOffset), int64(entryLength)), nil
+	return io.NewSectionReader(f, int64(entryOffset), int64(entryLength)), nil
 }
