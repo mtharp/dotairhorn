@@ -1,80 +1,39 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/jackc/pgx"
 	"github.com/mtharp/dotairhorn/dvoice"
-	"github.com/mtharp/dotairhorn/vpk"
-	"github.com/mtharp/dotairhorn/vres"
 )
 
 var (
-	queueCh   = make(chan queuedSound, 10)
-	archive   *vpk.VPK
-	basenames map[string]string
-	params    = dvoice.DefaultParams
+	queueCh = make(chan queuedSound, 10)
+	params  = dvoice.DefaultParams
+	db      *pgx.ConnPool
 )
 
 func main() {
-	token := flag.String("token", "", "")
-	dotadir := flag.String("dota-dir", "", "")
-	flag.Parse()
-	if *token == "" || *dotadir == "" {
+	token := os.Getenv("TOKEN")
+	if token == "" {
 		log.Fatalln("missing required argument")
 	}
-	f, err := os.Open("responses.txt")
+	cfg, err := pgx.ParseEnvLibpq()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("error:", err)
 	}
-	archive, err = vpk.Open(filepath.Join(*dotadir, "pak01_dir.vpk"), "vsnd_c")
+	db, err = pgx.NewConnPool(pgx.ConnPoolConfig{ConnConfig: cfg})
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln("error:", err)
 	}
-	basenames = make(map[string]string, len(archive.Files))
-	for name := range archive.Files {
-		bn := path.Base(name)
-		bn = bn[:len(bn)-7]
-		basenames[bn] = name
-		dirname := path.Base(path.Dir(name))
-		if dirname == "wisp" {
-			bn = "wisp_" + bn
-		} else if strings.HasPrefix(dirname, "announcer_dlc_") || dirname == "announcer_diretide_2012" {
-			bn = dirname[10:] + "_" + bn
-			log.Printf("%q -> %q", name, bn)
-		}
-		basenames[bn] = name
-	}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		words := strings.Fields(s.Text())
-		if len(words) < 2 {
-			continue
-		}
-		// find matching file in vpk
-		filename := words[0]
-		filename = basenames[filename]
-		if filename == "" {
-			log.Printf("sound not found in archive: %q", words[0])
-			continue
-		}
-		for _, word := range words[1:] {
-			soundmapAdd(word, filename)
-		}
-	}
-	if s.Err() != nil {
-		log.Fatalln(err)
-	}
-	dc, err := discordgo.New(*token)
+
+	dc, err := discordgo.New(token)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -94,7 +53,7 @@ func main() {
 }
 
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateStatus(0, "The International 9 Qualifiers")
+	s.UpdateStatus(0, "TI 9 Qualifiers")
 }
 
 func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -108,39 +67,38 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 	parts = parts[1:]
-	var entry *vpk.FileEntry
-	if len(parts) == 1 && strings.ContainsRune(parts[0], '_') {
-		entry = archive.Files[parts[0]]
-		if entry == nil {
-			filename := basenames[parts[0]]
-			if filename != "" {
-				entry = archive.Files[filename]
-			}
-		}
-	}
-	if entry == nil {
-		filename := soundmapFind(parts)
-		if filename == "" {
-			log.Printf("no matches: %s", strings.Join(parts, " "))
+
+	message := strings.Join(parts, " ")
+	go func() {
+		row := db.QueryRow(`
+		SELECT filename FROM dotairhorn WHERE left(lower(filename), -4) = lower($1)
+		UNION ALL
+		(SELECT filename FROM dotairhorn, websearch_to_tsquery($1) query WHERE search @@ query
+		ORDER BY $1 ILIKE hero || '%' DESC, ts_rank_cd(search, query) DESC, random())
+		`, message)
+		var filename string
+		if err := row.Scan(&filename); err == pgx.ErrNoRows {
+			log.Printf("No message found for %s", message)
+			return
+		} else if err != nil {
+			log.Printf("error: %s", err)
 			return
 		}
-		entry = archive.Files[filename]
-		if entry == nil {
-			log.Printf("sound %s is missing", filename)
+		log.Printf("Selected sound %s", filename)
+
+		frameList, err := fetchSound(filename)
+		if err != nil {
+			log.Printf("error: %s", err)
 			return
 		}
-	}
-	frameList, err := transcode(entry)
-	if err != nil {
-		log.Printf("error decoding %s: %s", entry.Name, err)
-		return
-	}
-	q := queuedSound{channel, frameList, entry}
-	select {
-	case queueCh <- q:
-	default:
-		log.Printf("play queue overflowed")
-	}
+
+		q := queuedSound{channel, frameList, filename}
+		select {
+		case queueCh <- q:
+		default:
+			log.Printf("play queue overflowed")
+		}
+	}()
 }
 
 func voiceChannelForUser(s *discordgo.Session, m *discordgo.MessageCreate) *discordgo.Channel {
@@ -169,7 +127,7 @@ func voiceChannelForUser(s *discordgo.Session, m *discordgo.MessageCreate) *disc
 type queuedSound struct {
 	channel   *discordgo.Channel
 	frameList [][]byte
-	entry     *vpk.FileEntry
+	filename  string
 }
 
 func playQueued(ctx context.Context, s *discordgo.Session) {
@@ -196,7 +154,6 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			}
 			continue
 		case q = <-queueCh:
-			log.Printf("playq: got sound %q", q.entry.Name)
 		}
 		leaveTimer.Stop()
 		select {
@@ -217,7 +174,7 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			}
 			log.Printf("joined")
 		}
-		log.Printf("playing %s", q.entry.Name)
+		log.Printf("playing %s", q.filename)
 		for _, frame := range q.frameList {
 			select {
 			case vc.OpusSend <- frame:
@@ -228,32 +185,4 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 		}
 		leaveTimer.Reset(time.Second)
 	}
-}
-
-func transcode(entry *vpk.FileEntry) ([][]byte, error) {
-	r, err := entry.Open()
-	if err != nil {
-		return nil, err
-	}
-	res, err := vres.Parse(r, entry.TotalSize)
-	if err != nil {
-		return nil, err
-	}
-	snd, err := res.Sound()
-	if err != nil {
-		return nil, err
-	}
-	var frameList [][]byte
-	ch := make(chan []byte)
-	done := make(chan struct{})
-	go func() {
-		for frame := range ch {
-			frameList = append(frameList, frame)
-		}
-		close(done)
-	}()
-	err = dvoice.PlayStream(context.Background(), ch, snd, params)
-	close(ch)
-	<-done
-	return frameList, err
 }
