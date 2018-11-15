@@ -18,6 +18,11 @@ import (
 	"github.com/mtharp/dotairhorn/dvoice"
 )
 
+const (
+	dotaBase = "https://dota2.gamepedia.com/"
+	tfBase   = "https://wiki.teamfortress.com/wiki/"
+)
+
 var (
 	mediaRe   = regexp.MustCompile(`(?:src|href)=["']([^"']+/[^"'/:]+(?:mp3|wav|aac))["']`)
 	transport = &http.Transport{
@@ -51,7 +56,7 @@ func grab(url string) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
-func fetchSound(filename string) ([][]byte, error) {
+func fetchSound(baseURL, filename string) ([][]byte, error) {
 	cachePath := filepath.Join("cache", filename+".opus")
 	f, err := os.Open(cachePath)
 	if err == nil {
@@ -66,7 +71,7 @@ func fetchSound(filename string) ([][]byte, error) {
 		return nil, err
 	}
 
-	page, err := grab("https://dota2.gamepedia.com/File:" + filename)
+	page, err := grab(baseURL + "File:" + filename)
 	if err != nil {
 		return nil, err
 	}

@@ -59,7 +59,18 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	msg := m.ContentWithMentionsReplaced()
 	parts := strings.Fields(msg)
-	if len(parts) < 2 || (parts[0] != "!dotahero" && parts[0] != "!d2") {
+	if len(parts) < 2 {
+		return
+	}
+	var table, baseURL string
+	switch parts[0] {
+	case "!d2":
+		table = "dotairhorn"
+		baseURL = dotaBase
+	case "!tf2":
+		table = "tf2"
+		baseURL = tfBase
+	default:
 		return
 	}
 	channel := voiceChannelForUser(s, m)
@@ -71,9 +82,9 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	message := strings.Join(parts, " ")
 	go func() {
 		row := db.QueryRow(`
-		SELECT filename FROM dotairhorn WHERE left(lower(filename), -4) = lower($1)
+		SELECT filename FROM `+table+` WHERE left(lower(filename), -4) = lower($1)
 		UNION ALL
-		(SELECT filename FROM dotairhorn, websearch_to_tsquery($1) query WHERE search @@ query
+		(SELECT filename FROM `+table+`, websearch_to_tsquery($1) query WHERE search @@ query
 		ORDER BY $1 ILIKE hero || '%' DESC, ts_rank_cd(search, query) DESC, random())
 		`, message)
 		var filename string
@@ -86,7 +97,7 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		log.Printf("Selected sound %s", filename)
 
-		frameList, err := fetchSound(filename)
+		frameList, err := fetchSound(baseURL, filename)
 		if err != nil {
 			log.Printf("error: %s", err)
 			return
