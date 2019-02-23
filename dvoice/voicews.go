@@ -35,6 +35,7 @@ type VoiceConn struct {
 	wsConn     *websocket.Conn
 	udpConn    net.Conn
 	opusParams OpusParams
+	chUpdate   chan struct{}
 
 	userID    string
 	guildID   string
@@ -45,7 +46,7 @@ type VoiceConn struct {
 	ssrc      uint32
 
 	heartbeatInterval time.Duration
-	wsOpen            bool
+	wsOpen, wsClosed  bool
 	heartbeatOnce     sync.Once
 	discoverOnce      sync.Once
 	senderOnce        sync.Once
@@ -62,6 +63,11 @@ func (c *VoiceConn) onVoiceStateUpdate(st *discordgo.VoiceStateUpdate) {
 		log.Printf("error joining voice channel: %s", err)
 	}
 	c.mu.Unlock()
+	// non-blocking notification
+	select {
+	case c.chUpdate <- struct{}{}:
+	default:
+	}
 }
 
 func (c *VoiceConn) onVoiceServerUpdate(st *discordgo.VoiceServerUpdate) {
@@ -74,15 +80,30 @@ func (c *VoiceConn) onVoiceServerUpdate(st *discordgo.VoiceServerUpdate) {
 	c.mu.Unlock()
 }
 
-func (c *VoiceConn) GuildID() string {
-	return c.guildID
-}
-
-func (c *VoiceConn) ChannelID() string {
+func (c *VoiceConn) join(channelID string) error {
 	c.mu.Lock()
-	v := c.channelID
+	if c.channelID == channelID {
+		c.mu.Unlock()
+		return nil
+	}
 	c.mu.Unlock()
-	return v
+	if err := c.h.s.ChannelVoiceJoinManual(c.guildID, channelID, false, false); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+	defer cancel()
+	c.mu.Lock()
+	for c.channelID != channelID {
+		c.mu.Unlock()
+		select {
+		case <-c.chUpdate:
+		case <-ctx.Done():
+			return errors.New("timed out waiting for voice state update")
+		}
+		c.mu.Lock()
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *VoiceConn) openLocked() error {
@@ -91,7 +112,7 @@ func (c *VoiceConn) openLocked() error {
 		return nil
 	}
 	if c.wsOpen {
-		log.Printf("warning: VoiceConn.openLocked called twice")
+		// changed channel
 		return nil
 	}
 	dest := "wss://" + strings.TrimSuffix(c.endpoint, ":80") + "?v=3"
@@ -128,6 +149,9 @@ func (c *VoiceConn) receiveWS() {
 			timeout = 120 * time.Second
 		}
 		if err := c.wsConn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			if c.ctx.Err() != nil {
+				return
+			}
 			log.Printf("error: setting read deadline on voice socket: %s", err)
 			return
 		}
@@ -172,8 +196,8 @@ func (c *VoiceConn) onMessage(msg []byte) error {
 		go c.senderOnce.Do(func() {
 			if err := c.opusSender(p.SecretKey); err != nil {
 				log.Printf("error: opus sender failed: %s", err)
+				c.uncleanClose()
 			}
-			c.Close()
 		})
 	case opHello:
 		p := new(struct {
@@ -241,10 +265,7 @@ func (c *VoiceConn) selectProtocol(p readyPayload) (err error) {
 	c.ssrc = p.SSRC
 	c.udpConn = conn
 	c.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // send periodic heartbeats to keep the websocket alive
@@ -253,7 +274,6 @@ func (c *VoiceConn) heartbeatWS() {
 	t := time.NewTicker(c.heartbeatInterval * 3 / 4)
 	defer t.Stop()
 	for c.ctx.Err() == nil {
-		log.Printf("voice heartbeat")
 		c.mu.Lock()
 		r := wsRequest{
 			Op:   opHeartbeat,
@@ -290,32 +310,28 @@ func (c *VoiceConn) sendSpeaking(speaking bool) error {
 	return err
 }
 
-// Close terminates the voice connection
+// Leave the current channel.
 func (c *VoiceConn) Close() {
-	log.Printf("closing voice connection")
-	c.mu.Lock()
-	if c.wsOpen {
-		c.cancel()
-	} else {
-		c.closeLocked()
-	}
-	inChannel := c.channelID != ""
-	c.channelID = ""
-	c.mu.Unlock()
-	if inChannel {
-		c.h.LeaveVoice(c.guildID)
-	}
+	log.Printf("%p leaving channel", c)
+	c.h.removeConn(c)
+	c.h.s.ChannelVoiceJoinManual(c.guildID, "", false, false)
+	c.uncleanClose()
 }
 
 // tear down the socket immediately. safe to call multiple times.
 func (c *VoiceConn) uncleanClose() {
+	c.h.removeConn(c)
+	c.cancel()
 	c.mu.Lock()
 	c.closeLocked()
 	c.mu.Unlock()
-	c.cancel()
 }
 
 func (c *VoiceConn) closeLocked() {
+	if c.wsClosed {
+		return
+	}
+	c.wsClosed = true
 	if c.wsConn != nil {
 		c.wsConn.Close()
 	}

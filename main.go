@@ -143,6 +143,7 @@ type queuedSound struct {
 
 func playQueued(ctx context.Context, s *discordgo.Session) {
 	var vc *dvoice.VoiceConn
+	var lastCID, lastGID string
 	h := dvoice.New(s)
 	leaveTimer := time.NewTimer(0)
 	defer func() {
@@ -162,6 +163,7 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 				log.Printf("playq: leaving")
 				vc.Close()
 				vc = nil
+				lastCID, lastGID = "", ""
 			}
 			continue
 		case q = <-queueCh:
@@ -171,9 +173,11 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 		case <-leaveTimer.C:
 		default:
 		}
-		if vc == nil || vc.GuildID() != q.channel.GuildID || vc.ChannelID() != q.channel.ID {
+		if vc == nil || q.channel.GuildID != lastGID || q.channel.ID != lastCID {
 			if vc != nil {
-				vc.Close()
+				if q.channel.GuildID != lastGID {
+					vc.Close()
+				}
 				vc = nil
 			}
 			log.Printf("joining")
@@ -184,6 +188,7 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 				continue
 			}
 			log.Printf("joined")
+			lastGID, lastCID = q.channel.GuildID, q.channel.ID
 		}
 		log.Printf("playing %s", q.filename)
 		for _, frame := range q.frameList {

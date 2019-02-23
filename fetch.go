@@ -31,8 +31,8 @@ var (
 			KeepAlive: 30 * time.Second,
 			DualStack: true,
 		}).DialContext,
-		MaxIdleConns:          10,
-		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          1,
+		IdleConnTimeout:       10 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}

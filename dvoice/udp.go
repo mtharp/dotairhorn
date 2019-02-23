@@ -66,6 +66,8 @@ func discoverIP(conn net.Conn, ssrc uint32) (addr net.UDPAddr, err error) {
 }
 
 func (c *VoiceConn) opusSender(secretKey [32]byte) error {
+	log.Printf("%p opus sender start", c)
+	defer log.Printf("%p opus sender stop", c)
 	pktbuf := make([]byte, 12, 1500)
 	pktbuf[0] = 0x80
 	pktbuf[1] = 0x78
@@ -88,10 +90,6 @@ func (c *VoiceConn) opusSender(secretKey [32]byte) error {
 	silence := []byte{frameConfigs[frameTime] << 3, 0xff, 0xfe}
 
 	var speaking bool
-	var underruns int
-	defer func() {
-		log.Printf("underruns: %d", underruns)
-	}()
 	for c.ctx.Err() == nil {
 		data = nil
 		if silenceSent < 5 {
@@ -102,7 +100,6 @@ func (c *VoiceConn) opusSender(secretKey [32]byte) error {
 					break
 				}
 			default:
-				underruns++
 			}
 		} else {
 			// already sent some trailing silence so just block until something shows up.
@@ -125,9 +122,6 @@ func (c *VoiceConn) opusSender(secretKey [32]byte) error {
 		if data == nil {
 			data = silence
 			silenceSent++
-			if silenceSent == 5 {
-				underruns -= 5
-			}
 		} else {
 			silenceSent = 0
 		}

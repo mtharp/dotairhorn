@@ -42,28 +42,31 @@ func (h *VoiceHandler) Join(guildID, channelID string, p OpusParams) (*VoiceConn
 		return nil, fmt.Errorf("frame time %s must be 2.5ms, 5ms, 10ms, or 20ms", frameTime)
 	}
 	h.mu.Lock()
-	if vc := h.conns[guildID]; vc != nil {
-		vc.Close()
+	vc := h.conns[guildID]
+	if vc == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		vc = &VoiceConn{
+			OpusSend:   make(chan []byte, 16),
+			h:          h,
+			userID:     h.s.State.User.ID,
+			guildID:    guildID,
+			ctx:        ctx,
+			cancel:     cancel,
+			opusParams: p,
+			chUpdate:   make(chan struct{}, 1),
+		}
+		h.conns[guildID] = vc
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	vc := &VoiceConn{
-		OpusSend:   make(chan []byte, 16),
-		h:          h,
-		userID:     h.s.State.User.ID,
-		guildID:    guildID,
-		ctx:        ctx,
-		cancel:     cancel,
-		opusParams: p,
-	}
-	h.conns[guildID] = vc
 	h.mu.Unlock()
-	err := h.s.ChannelVoiceJoinManual(guildID, channelID, false, false)
-	return vc, err
+	return vc, vc.join(channelID)
 }
 
-// LeaveVoice leaves the current voice channel for the specified guild
-func (h *VoiceHandler) LeaveVoice(guildID string) error {
-	return h.s.ChannelVoiceJoinManual(guildID, "", false, false)
+func (h *VoiceHandler) removeConn(vc *VoiceConn) {
+	h.mu.Lock()
+	if vc == h.conns[vc.guildID] {
+		delete(h.conns, vc.guildID)
+	}
+	h.mu.Unlock()
 }
 
 // dispatch voice state to the relevant VoiceConn
