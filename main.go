@@ -53,7 +53,11 @@ func main() {
 }
 
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateStatus(0, "TI 9 Qualifiers")
+	status := os.Getenv("STATUS")
+	if status == "" {
+		return
+	}
+	s.UpdateStatus(0, status)
 }
 
 func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
