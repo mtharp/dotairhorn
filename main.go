@@ -148,6 +148,7 @@ type queuedSound struct {
 func playQueued(ctx context.Context, s *discordgo.Session) {
 	var vc *dvoice.VoiceConn
 	var lastCID, lastGID string
+	skipGID := make(map[string]struct{})
 	h := dvoice.New(s)
 	leaveTimer := time.NewTimer(0)
 	defer func() {
@@ -169,6 +170,11 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 				vc = nil
 				lastCID, lastGID = "", ""
 			}
+			// stop ignoring guilds we were disconnected from once the timer has elapsed
+			for gid := range skipGID {
+				log.Printf("re-enabling guild %s", gid)
+				delete(skipGID, gid)
+			}
 			continue
 		case q = <-queueCh:
 		}
@@ -184,6 +190,11 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 				}
 				vc = nil
 			}
+			if _, skip := skipGID[q.channel.GuildID]; skip {
+				log.Printf("sksipping %s due to previously being disconnected from that guild", q.filename)
+				leaveTimer.Reset(time.Second)
+				continue
+			}
 			log.Printf("joining")
 			var err error
 			vc, err = h.Join(q.channel.GuildID, q.channel.ID, params)
@@ -195,9 +206,17 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			lastGID, lastCID = q.channel.GuildID, q.channel.ID
 		}
 		log.Printf("playing %s", q.filename)
+	sendLoop:
 		for _, frame := range q.frameList {
 			select {
 			case vc.OpusSend <- frame:
+			case <-vc.Context().Done():
+				log.Printf("playq: force disconnected")
+				vc.Close()
+				vc = nil
+				// skip all further sounds for this guild in this run
+				skipGID[lastGID] = struct{}{}
+				break sendLoop
 			case <-ctx.Done():
 				log.Printf("playq: exiting")
 				return

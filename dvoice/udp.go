@@ -61,7 +61,7 @@ func discoverIP(conn net.Conn, ssrc uint32) (addr net.UDPAddr, err error) {
 		return
 	}
 	// port as the last 2 bytes of the response
-	addr.Port = int(binary.LittleEndian.Uint16(buf[len(buf)-2:]))
+	addr.Port = int(binary.BigEndian.Uint16(buf[len(buf)-2:]))
 	return
 }
 

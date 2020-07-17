@@ -52,6 +52,10 @@ type VoiceConn struct {
 	senderOnce        sync.Once
 }
 
+func (c *VoiceConn) Context() context.Context {
+	return c.ctx
+}
+
 func (c *VoiceConn) onVoiceStateUpdate(st *discordgo.VoiceStateUpdate) {
 	if st.UserID != c.userID || st.ChannelID == "" {
 		return
