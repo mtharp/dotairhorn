@@ -8,16 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"eaglesong.dev/dvoice"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx"
-	"github.com/mtharp/dotairhorn/dvoice"
 )
 
 var (
 	queueCh = make(chan queuedSound, 10)
-	params  = dvoice.DefaultParams
 	db      *pgx.ConnPool
 )
+
+const bitrate = 64000
 
 func main() {
 	token := os.Getenv("TOKEN")
@@ -146,10 +147,13 @@ type queuedSound struct {
 }
 
 func playQueued(ctx context.Context, s *discordgo.Session) {
-	var vc *dvoice.VoiceConn
+	var vc *dvoice.Conn
 	var lastCID, lastGID string
 	skipGID := make(map[string]struct{})
-	h := dvoice.New(s)
+	h, err := dvoice.New(s, dvoice.Config{Bitrate: bitrate})
+	if err != nil {
+		log.Fatalln("error: attaching voice handler:", err)
+	}
 	leaveTimer := time.NewTimer(0)
 	defer func() {
 		if vc != nil {
@@ -197,7 +201,7 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			}
 			log.Printf("joining")
 			var err error
-			vc, err = h.Join(q.channel.GuildID, q.channel.ID, params)
+			vc, err = h.Join(ctx, q.channel.GuildID, q.channel.ID)
 			if err != nil {
 				log.Printf("error: failed to join voice channel %q<%s> on %s: %s", q.channel.Name, q.channel.ID, q.channel.GuildID, err)
 				continue
@@ -206,20 +210,18 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 			lastGID, lastCID = q.channel.GuildID, q.channel.ID
 		}
 		log.Printf("playing %s", q.filename)
-	sendLoop:
 		for _, frame := range q.frameList {
-			select {
-			case vc.OpusSend <- frame:
-			case <-vc.Context().Done():
+			if err := vc.WriteFrame(ctx, frame); err != nil {
+				if ctx.Err() != nil {
+					log.Printf("playq: exiting")
+					return
+				}
 				log.Printf("playq: force disconnected")
 				vc.Close()
 				vc = nil
 				// skip all further sounds for this guild in this run
 				skipGID[lastGID] = struct{}{}
-				break sendLoop
-			case <-ctx.Done():
-				log.Printf("playq: exiting")
-				return
+				break
 			}
 		}
 		leaveTimer.Reset(time.Second)

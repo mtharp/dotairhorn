@@ -15,7 +15,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/mtharp/dotairhorn/dvoice"
+	"eaglesong.dev/dvoice"
 )
 
 const (
@@ -95,7 +95,7 @@ func fetchSound(baseURL, filename string) ([][]byte, error) {
 		}
 		close(done)
 	}()
-	err = dvoice.PlayStream(context.Background(), ch, bytes.NewReader(mp3), params)
+	err = dvoice.Convert(context.Background(), ch, bytes.NewReader(mp3), bitrate)
 	close(ch)
 	<-done
 	if err != nil {
