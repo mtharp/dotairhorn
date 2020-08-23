@@ -9,13 +9,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
+	"strings"
 	"time"
 
 	"eaglesong.dev/dvoice"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 const (
@@ -24,7 +27,6 @@ const (
 )
 
 var (
-	mediaRe   = regexp.MustCompile(`(?:src|href)=["']([^"']+/[^"'/:]+(?:mp3|wav|aac))["']`)
 	transport = &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
@@ -56,6 +58,34 @@ func grab(url string) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
+func findMedia(baseURL, filename string) (string, error) {
+	uppercased := strings.ToUpper(filename[:1]) + filename[1:]
+	fileURL := baseURL + "File:" + uppercased
+	page, err := grab(fileURL)
+	if err != nil {
+		return "", err
+	}
+	u, _ := url.Parse(baseURL)
+	t := html.NewTokenizer(bytes.NewReader(page))
+	for t.Next() != html.ErrorToken {
+		tok := t.Token()
+		if tok.Type != html.StartTagToken || tok.DataAtom != atom.Audio {
+			continue
+		}
+		for _, attr := range tok.Attr {
+			if attr.Key != "src" {
+				continue
+			}
+			u, err = u.Parse(attr.Val)
+			if err != nil {
+				return "", err
+			}
+			return u.String(), nil
+		}
+	}
+	return "", fmt.Errorf("no audio tag found in %s", fileURL)
+}
+
 func fetchSound(baseURL, filename string) ([][]byte, error) {
 	cachePath := filepath.Join("cache", filename+".opus")
 	f, err := os.Open(cachePath)
@@ -71,17 +101,11 @@ func fetchSound(baseURL, filename string) ([][]byte, error) {
 		return nil, err
 	}
 
-	page, err := grab(baseURL + "File:" + filename)
+	mp3URL, err := findMedia(baseURL, filename)
 	if err != nil {
 		return nil, err
 	}
-	matches := mediaRe.FindSubmatch(page)
-	if len(matches) < 2 {
-		return nil, fmt.Errorf("failed to extract media URL from %s", filename)
-	}
-	url := string(matches[1])
-
-	mp3, err := grab(url)
+	mp3, err := grab(mp3URL)
 	if err != nil {
 		return nil, err
 	}

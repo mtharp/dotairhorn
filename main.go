@@ -195,7 +195,7 @@ func playQueued(ctx context.Context, s *discordgo.Session) {
 				vc = nil
 			}
 			if _, skip := skipGID[q.channel.GuildID]; skip {
-				log.Printf("sksipping %s due to previously being disconnected from that guild", q.filename)
+				log.Printf("skipping %s due to previously being disconnected from that guild", q.filename)
 				leaveTimer.Reset(time.Second)
 				continue
 			}
