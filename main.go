@@ -86,12 +86,17 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	message := strings.Join(parts, " ")
 	go func() {
-		row := db.QueryRow(`
-		SELECT filename FROM `+table+` WHERE left(lower(filename), -4) = lower($1)
+		query := `
+		SELECT filename FROM ` + table + ` WHERE left(lower(filename), -4) = lower($1)
 		UNION ALL
-		(SELECT filename FROM `+table+`, websearch_to_tsquery($1) query WHERE search @@ query
-		ORDER BY $1 ILIKE hero || '%' DESC, ts_rank_cd(search, query) DESC, random())
-		`, message)
+		(SELECT filename FROM ` + table + ` WHERE hero ILIKE $1 ORDER BY random())
+		UNION ALL
+		(SELECT filename FROM ` + table + `, websearch_to_tsquery($1) query WHERE search @@ query
+		ORDER BY $1 ILIKE hero || '%' DESC, $1 ILIKE '%' || message || '%' DESC, ts_rank_cd(search, query) DESC, random())
+		LIMIT 1
+		`
+		// log.Println(query)
+		row := db.QueryRow(query, message)
 		var filename string
 		if err := row.Scan(&filename); err == pgx.ErrNoRows {
 			log.Printf("No message found for %s", message)

@@ -58,6 +58,16 @@ func grab(url string) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
+func hrefFrom(tok html.Token, attrName string) *url.URL {
+	for _, attr := range tok.Attr {
+		if attr.Key == attrName {
+			u, _ := url.Parse(attr.Val)
+			return u
+		}
+	}
+	return nil
+}
+
 func findMedia(baseURL, filename string) (string, error) {
 	uppercased := strings.ToUpper(filename[:1]) + filename[1:]
 	fileURL := baseURL + "File:" + uppercased
@@ -65,22 +75,29 @@ func findMedia(baseURL, filename string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	u, _ := url.Parse(baseURL)
+	baseU, _ := url.Parse(baseURL)
+	var maybeU *url.URL
 	t := html.NewTokenizer(bytes.NewReader(page))
+	// look for <a href="filename.mp3">filename.mp3</a>
 	for t.Next() != html.ErrorToken {
 		tok := t.Token()
-		if tok.Type != html.StartTagToken || tok.DataAtom != atom.Audio {
-			continue
-		}
-		for _, attr := range tok.Attr {
-			if attr.Key != "src" {
-				continue
+		switch tok.Type {
+		case html.StartTagToken:
+			switch tok.DataAtom {
+			case atom.A:
+				// found a link, remember the href and then look at the link text
+				maybeU = hrefFrom(tok, "href")
+			default:
+				maybeU = nil
 			}
-			u, err = u.Parse(attr.Val)
-			if err != nil {
-				return "", err
+		case html.TextToken:
+			if maybeU != nil && strings.EqualFold(tok.Data, filename) {
+				// link text matches wanted filename, use the href from the link
+				return baseU.ResolveReference(maybeU).String(), nil
 			}
-			return u.String(), nil
+			maybeU = nil
+		default:
+			maybeU = nil
 		}
 	}
 	return "", fmt.Errorf("no audio tag found in %s", fileURL)
