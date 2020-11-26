@@ -2,3 +2,4 @@
 *.vsnd_c
 *.psql
 cache
+_*

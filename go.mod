@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	eaglesong.dev/dvoice v0.0.0-20200718001033-770ecc035c7f
-	github.com/bwmarrin/discordgo v0.22.0
+	github.com/bwmarrin/discordgo v0.22.1-0.20201122145021-31f70d439498
 	github.com/cockroachdb/apd v1.1.0 // indirect
 	github.com/gofrs/uuid v3.3.0+incompatible // indirect
 	github.com/jackc/fake v0.0.0-20150926172116-812a484cc733 // indirect

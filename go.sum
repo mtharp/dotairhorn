@@ -2,8 +2,8 @@ eaglesong.dev/dvoice v0.0.0-20200718001033-770ecc035c7f h1:0YgLuM6WW75c3u2jfxLR4
 eaglesong.dev/dvoice v0.0.0-20200718001033-770ecc035c7f/go.mod h1:Nn7ojEIrKeId5G/P8m3T7PKyy9ZVwpOqFWynQ0iPwYg=
 github.com/bwmarrin/discordgo v0.21.1 h1:UI2PWwzvn5IFuscYcDc6QB/duhs9MUIjQ4HclcIZisc=
 github.com/bwmarrin/discordgo v0.21.1/go.mod h1:c1WtWUGN6nREDmzIpyTp/iD3VYt4Fpx+bVyfBG7JE+M=
-github.com/bwmarrin/discordgo v0.22.0 h1:uBxY1HmlVCsW1IuaPjpCGT6A2DBwRn0nvOguQIxDdFM=
-github.com/bwmarrin/discordgo v0.22.0/go.mod h1:c1WtWUGN6nREDmzIpyTp/iD3VYt4Fpx+bVyfBG7JE+M=
+github.com/bwmarrin/discordgo v0.22.1-0.20201122145021-31f70d439498 h1:vDgQMWbhF6my1IYpqyP5a+L3YIiM7QtoR+1hY3EYjGY=
+github.com/bwmarrin/discordgo v0.22.1-0.20201122145021-31f70d439498/go.mod h1:c1WtWUGN6nREDmzIpyTp/iD3VYt4Fpx+bVyfBG7JE+M=
 github.com/cockroachdb/apd v1.1.0 h1:3LFP3629v+1aKXU5Q37mxmRxX/pIu1nijXydLShEq5I=
 github.com/cockroachdb/apd v1.1.0/go.mod h1:8Sl8LxpKi29FqWXR16WEFZRNSz3SoPzUzeMeY4+DwBQ=
 github.com/gofrs/uuid v3.3.0+incompatible h1:8K4tyRfvU1CYPgJsveYFQMhpFd/wXNM7iK6rR7UHz84=

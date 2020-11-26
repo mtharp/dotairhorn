@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,15 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	if status == "" {
 		return
 	}
-	s.UpdateStatus(0, status)
+	statusType, _ := strconv.ParseInt(os.Getenv("STATUS_TYPE"), 10, 0)
+	s.UpdateStatusComplex(discordgo.UpdateStatusData{
+		Status: status,
+		Game: &discordgo.Game{
+			Name: status,
+			Type: discordgo.GameType(statusType),
+			URL:  os.Getenv("STATUS_URL"),
+		},
+	})
 }
 
 func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
