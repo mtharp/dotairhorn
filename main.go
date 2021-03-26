@@ -41,6 +41,7 @@ func main() {
 	}
 	dc.AddHandler(onReady)
 	dc.AddHandler(onMessage)
+	dc.AddHandler(onInteraction)
 	dc.LogLevel = discordgo.LogInformational
 	if err := dc.Open(); err != nil {
 		log.Fatalln(err)
@@ -55,6 +56,15 @@ func main() {
 }
 
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
+	for _, guild := range event.Guilds {
+		for _, cmd := range commands {
+			if cmd, err := s.ApplicationCommandCreate(s.State.User.ID, guild.ID, cmd); err != nil {
+				log.Println("error: registering command:", err)
+			} else {
+				log.Println("registered", cmd.ID)
+			}
+		}
+	}
 	status := os.Getenv("STATUS")
 	if status == "" {
 		return
@@ -77,14 +87,12 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(parts) < 2 {
 		return
 	}
-	var table, baseURL string
+	var game string
 	switch parts[0] {
 	case "!d2":
-		table = "dotairhorn"
-		baseURL = dotaBase
+		game = "dota2"
 	case "!tf2":
-		table = "tf2"
-		baseURL = tfBase
+		game = "tf2"
 	default:
 		return
 	}
@@ -93,43 +101,27 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 	parts = parts[1:]
-
 	message := strings.Join(parts, " ")
-	go func() {
-		query := `
-		SELECT filename FROM ` + table + ` WHERE left(lower(filename), -4) = lower($1)
-		UNION ALL
-		(SELECT filename FROM ` + table + ` WHERE hero ILIKE $1 ORDER BY random())
-		UNION ALL
-		(SELECT filename FROM ` + table + `, websearch_to_tsquery($1) query WHERE search @@ query
-		ORDER BY $1 ILIKE hero || '%' DESC, $1 ILIKE '%' || message || '%' DESC, ts_rank_cd(search, query) DESC, random())
-		LIMIT 1
-		`
-		// log.Println(query)
-		row := db.QueryRow(query, message)
-		var filename string
-		if err := row.Scan(&filename); err == pgx.ErrNoRows {
-			log.Printf("No message found for %s", message)
-			return
-		} else if err != nil {
-			log.Printf("error: %s", err)
-			return
-		}
-		log.Printf("Selected sound %s", filename)
-
-		frameList, err := fetchSound(baseURL, filename)
-		if err != nil {
-			log.Printf("error: %s", err)
-			return
-		}
-
-		q := queuedSound{channel, frameList, filename}
-		select {
-		case queueCh <- q:
-		default:
-			log.Printf("play queue overflowed")
-		}
-	}()
+	selected := selectSound(game, message, "")
+	switch selected.Status {
+	case statusOK:
+	case statusError:
+		return
+	case statusNotFound:
+		log.Printf("no message found for %s", message)
+		return
+	}
+	frameList, err := fetchSound(baseURLs[game], selected.Filename)
+	if err != nil {
+		log.Printf("error: %s", err)
+		return
+	}
+	q := queuedSound{channel, frameList, selected.Filename}
+	select {
+	case queueCh <- q:
+	default:
+		log.Printf("play queue overflowed")
+	}
 }
 
 func voiceChannelForUser(s *discordgo.Session, m *discordgo.MessageCreate) *discordgo.Channel {

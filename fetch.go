@@ -21,10 +21,10 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-const (
-	dotaBase = "https://dota2.gamepedia.com/"
-	tfBase   = "https://wiki.teamfortress.com/wiki/"
-)
+var baseURLs = map[string]string{
+	"dota2": "https://dota2.fandom.com/wiki/",
+	"tf2":   "https://wiki.teamfortress.com/wiki/",
+}
 
 var (
 	transport = &http.Transport{
@@ -66,6 +66,15 @@ func hrefFrom(tok html.Token, attrName string) *url.URL {
 		}
 	}
 	return nil
+}
+
+func wikiURL(baseURL, title string) string {
+	if title == "" {
+		return ""
+	}
+	title = strings.ToUpper(title[:1]) + title[1:]
+	title = strings.ReplaceAll(title, " ", "_")
+	return baseURL + title
 }
 
 func findMedia(baseURL, filename string) (string, error) {
