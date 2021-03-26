@@ -62,11 +62,12 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	statusType, _ := strconv.ParseInt(os.Getenv("STATUS_TYPE"), 10, 0)
 	s.UpdateStatusComplex(discordgo.UpdateStatusData{
 		Status: status,
-		Game: &discordgo.Game{
+		Activities: []*discordgo.Activity{{
 			Name: status,
-			Type: discordgo.GameType(statusType),
-			URL:  os.Getenv("STATUS_URL"),
-		},
+			Type: discordgo.ActivityType(statusType),
+
+			URL: os.Getenv("STATUS_URL"),
+		}},
 	})
 }
 
