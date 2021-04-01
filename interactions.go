@@ -27,7 +27,24 @@ var commands = []*discordgo.ApplicationCommand{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
 				Name:        "hero",
-				Description: "Filter search for voice lines to hero",
+				Description: "Filter search for voice lines by hero",
+			},
+		},
+	},
+	{
+		Name:        "tf2",
+		Description: "Play Team Fortress 2 voice lines in your current voice channel",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "search",
+				Description: "Search for a voice line by text",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "merc",
+				Description: "Filter search for voice lines by merc",
 			},
 		},
 	},
@@ -59,7 +76,7 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionApplicationCommandResponseData{
-				Content: "\U0001F507 Command must be used in a voice channel",
+				Content: "\U0001F507 Command must be used while you are in a voice channel",
 			},
 		})
 		return
@@ -69,10 +86,14 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if baseURL == "" {
 		return
 	}
-	search := i.Data.Options[0].StringValue()
-	var hero string
-	if len(i.Data.Options) > 1 {
-		hero = i.Data.Options[1].StringValue()
+	var search, hero string
+	for _, opt := range i.Data.Options {
+		switch opt.Name {
+		case "hero", "merc":
+			hero = opt.StringValue()
+		case "search":
+			search = opt.StringValue()
+		}
 	}
 	selected := selectSound(game, search, hero)
 	switch selected.Status {
