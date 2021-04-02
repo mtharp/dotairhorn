@@ -41,21 +41,24 @@ var (
 	cli = &http.Client{Transport: transport}
 )
 
-func grab(url string) ([]byte, error) {
+func grab(url string) (blob []byte, basename string, err error) {
 	log.Printf("Fetching %s", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return
 	}
 	resp, err := cli.Do(req)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %s fetching %s", resp.Status, resp.Request.URL)
+		err = fmt.Errorf("HTTP %s fetching %s", resp.Status, resp.Request.URL)
+		return
 	}
-	return ioutil.ReadAll(resp.Body)
+	basename = path.Base(resp.Request.URL.Path)
+	blob, err = ioutil.ReadAll(resp.Body)
+	return
 }
 
 func hrefFrom(tok html.Token, attrName string) *url.URL {
@@ -80,10 +83,11 @@ func wikiURL(baseURL, title string) string {
 func findMedia(baseURL, filename string) (string, error) {
 	uppercased := strings.ToUpper(filename[:1]) + filename[1:]
 	fileURL := baseURL + "File:" + uppercased
-	page, err := grab(fileURL)
+	page, actualPageFilename, err := grab(fileURL)
 	if err != nil {
 		return "", err
 	}
+	actualPageFilename = strings.TrimPrefix(actualPageFilename, "File:")
 	baseU, _ := url.Parse(baseURL)
 	var maybeU *url.URL
 	t := html.NewTokenizer(bytes.NewReader(page))
@@ -100,7 +104,7 @@ func findMedia(baseURL, filename string) (string, error) {
 				maybeU = nil
 			}
 		case html.TextToken:
-			if maybeU != nil && strings.EqualFold(tok.Data, filename) {
+			if maybeU != nil && strings.EqualFold(tok.Data, actualPageFilename) {
 				// link text matches wanted filename, use the href from the link
 				return baseU.ResolveReference(maybeU).String(), nil
 			}
@@ -131,7 +135,7 @@ func fetchSound(baseURL, filename string) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	mp3, err := grab(mp3URL)
+	mp3, _, err := grab(mp3URL)
 	if err != nil {
 		return nil, err
 	}
