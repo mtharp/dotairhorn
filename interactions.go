@@ -4,9 +4,10 @@ import (
 	"log"
 	"strings"
 
+	"dotairhorn/internal"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx"
-	"dotairhorn/internal"
 )
 
 var tables = map[string]string{
@@ -69,6 +70,10 @@ type selectedSound struct {
 }
 
 func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
+	data := i.ApplicationCommandData()
 	var channel *discordgo.Channel
 	if i.Member != nil {
 		channel = findVoiceChannel(s, i.GuildID, i.Member.User.ID)
@@ -76,19 +81,19 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if channel == nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionApplicationCommandResponseData{
+			Data: &discordgo.InteractionResponseData{
 				Content: "\U0001F507 Command must be used while you are in a voice channel",
 			},
 		})
 		return
 	}
-	game := i.Data.Name
+	game := data.Name
 	baseURL := baseURLs[game]
 	if baseURL == "" {
 		return
 	}
 	var search, hero string
-	for _, opt := range i.Data.Options {
+	for _, opt := range data.Options {
 		switch opt.Name {
 		case "hero", "merc":
 			hero = opt.StringValue()
@@ -102,7 +107,7 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	default:
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionApplicationCommandResponseData{
+			Data: &discordgo.InteractionResponseData{
 				Content: "\U0001F507 Something went wrong...",
 			},
 		})
@@ -110,7 +115,7 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case statusNotFound:
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionApplicationCommandResponseData{
+			Data: &discordgo.InteractionResponseData{
 				Content: "\U0001F50E Not found",
 			},
 		})
@@ -126,7 +131,7 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionApplicationCommandResponseData{
+		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})

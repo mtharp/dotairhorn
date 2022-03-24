@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	eaglesong.dev/dvoice v0.0.0-20200718001033-770ecc035c7f
-	github.com/bwmarrin/discordgo v0.23.3-0.20210314162722-182d9b48f34b
+	github.com/bwmarrin/discordgo v0.24.0
 	github.com/jackc/pgx v3.6.2+incompatible
 	github.com/joho/godotenv v1.4.0
 )
