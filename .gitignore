@@ -1,5 +1,6 @@
 *.mp3
 *.vsnd_c
 *.psql
+*.local
 cache
 _*

@@ -6,6 +6,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx"
+	"dotairhorn/internal"
 )
 
 var tables = map[string]string{
@@ -118,7 +119,7 @@ func onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{
 			Name:    selected.Hero,
-			URL:     wikiURL(baseURL, selected.Page),
+			URL:     internal.PageURL(baseURL, selected.Page),
 			IconURL: selected.Icon,
 		},
 		Description: selected.Message,

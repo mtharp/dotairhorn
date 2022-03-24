@@ -12,6 +12,7 @@ import (
 	"eaglesong.dev/dvoice"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx"
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -22,6 +23,8 @@ var (
 const bitrate = 64000
 
 func main() {
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load(".env.local")
 	token := os.Getenv("TOKEN")
 	if token == "" {
 		log.Fatalln("missing required argument")
